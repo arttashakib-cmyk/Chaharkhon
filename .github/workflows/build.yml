@@ -1,0 +1,47 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          ZIP=$(ls *.zip | head -n 1)
+          echo "Using $ZIP"
+          mkdir -p work
+          unzip -q "$ZIP" -d work
+          # پوشه‌ی پروژه را پیدا کن (جایی که settings.gradle.kts هست)
+          PROJECT=$(dirname "$(find work -name settings.gradle.kts | head -n 1)")
+          echo "PROJECT_DIR=$PROJECT" >> $GITHUB_ENV
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleDebug --no-daemon
+
+      - name: Build release APK
+        continue-on-error: true
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Chaharchin-APK
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
