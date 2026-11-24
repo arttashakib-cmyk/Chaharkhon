@@ -1,3 +1,4 @@
+
 name: Build APK
 
 on:
@@ -7,41 +8,76 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Unzip project
+      - name: Extract project
+        shell: bash
         run: |
-          ZIP=$(ls *.zip | head -n 1)
-          echo "Using $ZIP"
-          mkdir -p work
-          unzip -q "$ZIP" -d work
-          # پوشه‌ی پروژه را پیدا کن (جایی که settings.gradle.kts هست)
-          PROJECT=$(dirname "$(find work -name settings.gradle.kts | head -n 1)")
-          echo "PROJECT_DIR=$PROJECT" >> $GITHUB_ENV
+          ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" -print -quit)
 
-      - uses: actions/setup-java@v4
+          if [ -n "$ZIP" ]; then
+            echo "Extracting: $ZIP"
+            mkdir -p work
+            unzip -q "$ZIP" -d work
+            ROOT="work"
+          else
+            ROOT="."
+          fi
+
+          PROJECT=$(dirname "$(find "$ROOT" -name settings.gradle.kts -print -quit)")
+
+          if [ -z "$PROJECT" ] || [ ! -f "$PROJECT/app/build.gradle.kts" ]; then
+            echo "Android project not found!"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+          echo "Project found: $PROJECT"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
 
-      - name: Build debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle assembleDebug --no-daemon
+      - name: Temporary Kotlin compatibility fix
+        shell: bash
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+        run: |
+          find "$PROJECT_DIR/app/src" -type f -name "*.kt" \
+            -exec sed -i 's/setCurrent(/updateCurrent(/g' {} +
 
-      - name: Build release APK
+          echo "Temporary patch applied."
+          echo "Original repository files remain unchanged."
+
+      - name: Build Debug APK
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+        run: |
+          gradle -p "$PROJECT_DIR" assembleDebug --no-daemon
+
+      - name: Build Release APK
         continue-on-error: true
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle assembleRelease --no-daemon
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+        run: |
+          gradle -p "$PROJECT_DIR" assembleRelease --no-daemon
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: Chaharchin-APK
           path: |
             ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
             ${{ env.PROJECT_DIR }}/app/build/outputs/apk/release/*.apk
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 14
